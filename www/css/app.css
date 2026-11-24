@@ -332,3 +332,9 @@ select.input {
 .set-btn { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--surface); border-radius: 10px; margin-bottom: 6px; text-align: left; font-weight: 500; cursor: pointer; }
 .set-btn:active { background: var(--surface-2); }
 .set-btn.danger { color: var(--danger); }
+
+/* ---------- Nova demanda rápida ---------- */
+.icon-btn.accent { background: var(--primary); color: var(--primary-text); width: 38px; height: 38px; }
+.title-input.boxed { background: var(--surface); border: 1.5px solid var(--border); border-radius: 12px; padding: 12px; font-size: 18px; }
+.title-input.boxed:focus { border-color: var(--primary); padding: 12px; }
+.quick-form .btn.ghost { margin-top: 6px; }

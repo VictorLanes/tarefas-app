@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_today_desc">Demandas atrasadas, de hoje e de amanhã. Toque no círculo para concluir.</string>
+    <string name="widget_summary_desc">Resumo: pendentes, atrasadas e para hoje.</string>
+    <string name="widget_quickadd_desc">Atalho para criar uma nova demanda.</string>
+</resources>

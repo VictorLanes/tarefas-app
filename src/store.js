@@ -57,6 +57,13 @@ class Store {
     return this.data;
   }
 
+  // recarrega do armazenamento (ex.: o widget concluiu uma demanda)
+  async reload() {
+    if (!this.userId) return;
+    await this.load(this.userId);
+    this.listeners.forEach((fn) => fn());
+  }
+
   unload() {
     this.userId = null;
     this.data = emptyData();

@@ -28,6 +28,10 @@ Cada `push` na branch `main` gera um APK novo automaticamente (aba **Actions** �
 - **Busca** em todos os quadros e **filtros** por texto, prioridade, prazo e etiqueta
 - Painel com pendentes, atrasadas, para hoje e concluídas na semana
 - Tema claro, escuro ou automático
+- **Widgets na tela inicial**:
+  - *Demandas de hoje* (redimensionável): atrasadas, hoje e amanhã. Toque no círculo para concluir sem abrir o app; toque no texto para abrir o cartão; "+" cria uma nova
+  - *Resumo*: pendentes, atrasadas e para hoje
+  - *Nova demanda* (1×1): abre direto a criação rápida
 - **Backup**: exportar/importar `.json` (compartilhe para o Drive, WhatsApp, e-mail...)
 
 ## Tecnologia

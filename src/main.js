@@ -1,4 +1,5 @@
-import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core';
+import { Capacitor, SystemBars, SystemBarsStyle, registerPlugin } from '@capacitor/core';
+import { Preferences } from '@capacitor/preferences';
 import { App } from '@capacitor/app';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -29,7 +30,21 @@ const state = {
 };
 
 let sortables = [];
-let pendingOpenCard = null;
+let pendingLink = null;
+const WidgetBridge = registerPlugin('WidgetBridge');
+
+// ---------- Widgets ----------
+let widgetTimer = null;
+function refreshWidgets() {
+  if (!native) return;
+  clearTimeout(widgetTimer);
+  widgetTimer = setTimeout(() => WidgetBridge.refresh().catch(() => {}), 400);
+}
+async function setWidgetUser(userId) {
+  if (userId) await Preferences.set({ key: 'widget_user', value: userId });
+  else await Preferences.remove({ key: 'widget_user' });
+  refreshWidgets();
+}
 const haptic = () => native && Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
 
 // ======================================================================
@@ -135,6 +150,7 @@ async function startSession(user, isNew = false) {
   state.boardId = null;
   await store.load(user.id);
   if (isNew && store.boards(true).length === 0) seedFirstBoard();
+  await setWidgetUser(user.id);
   applyTheme();
   await applyPendingActions();
   render();
@@ -146,10 +162,10 @@ async function startSession(user, isNew = false) {
       if (st !== 'granted') toast('Notificações desativadas. Ative em Ajustes para receber lembretes.');
     }, 800);
   }
-  if (pendingOpenCard) {
-    const id = pendingOpenCard;
-    pendingOpenCard = null;
-    if (store.card(id)) openCard(id);
+  if (pendingLink) {
+    const link = pendingLink;
+    pendingLink = null;
+    setTimeout(() => handleLink(link), 300);
   }
 }
 
@@ -170,6 +186,7 @@ function seedFirstBoard() {
 
 async function logout() {
   await auth.clearSession();
+  await setWidgetUser(null);
   state.user = null;
   store.unload();
   state.authMode = 'login';
@@ -226,7 +243,7 @@ function viewHome() {
   ${boards.length ? `<div class="board-grid">${boards.map(boardTile).join('')}</div>`
     : `<div class="empty">${icon('boards', 40)}<p>Nenhum quadro ainda.</p><button class="btn primary" data-act="new-board">Criar quadro</button></div>`}
   ${archived.length ? `<button class="link center block" data-act="archived-boards">${icon('archive', 16)} Quadros arquivados (${archived.length})</button>` : ''}
-  <button class="fab" data-act="new-board" aria-label="Novo quadro">${icon('plus', 26)}</button>`;
+  <button class="fab" data-act="fab" aria-label="Criar">${icon('plus', 26)}</button>`;
 }
 
 async function newBoard() {
@@ -1182,6 +1199,18 @@ $app.addEventListener('click', async (e) => {
     case 'search':
       openSearch();
       break;
+    case 'quick-add':
+      quickAdd();
+      break;
+    case 'fab': {
+      const v2 = await actionSheet({ items: [
+        { label: 'Nova demanda', icon: 'checklist', value: 'card' },
+        { label: 'Novo quadro', icon: 'boards', value: 'board' },
+      ] });
+      if (v2 === 'card') quickAdd();
+      if (v2 === 'board') newBoard();
+      break;
+    }
     case 'new-board':
       newBoard();
       break;
@@ -1382,7 +1411,160 @@ async function handleNotificationAction(actionId, extra) {
   }
   // toque na notificação: abre o cartão
   if (sameUser) openCard(extra.cardId);
-  else pendingOpenCard = extra.cardId;
+  else pendingLink = 'demandas://card/' + extra.cardId;
+}
+
+// ---------- Links internos (vindos dos widgets) ----------
+let lastLink = { url: '', at: 0 };
+function handleLink(url) {
+  if (!url || !url.startsWith('demandas://')) return;
+  if (url === lastLink.url && Date.now() - lastLink.at < 2000) return;
+  lastLink = { url, at: Date.now() };
+  if (!state.user) {
+    pendingLink = url;
+    return;
+  }
+  const [, action, id] = url.match(/^demandas:\/\/([^/?#]+)\/?([^/?#]*)/) || [];
+  closeAllOverlays();
+  if (action === 'new') return quickAdd();
+  if (action === 'agenda') {
+    state.boardId = null;
+    state.tab = 'agenda';
+    return render();
+  }
+  if (action === 'card' && id) {
+    if (store.card(id)) openCard(id);
+    else toast('Essa demanda não existe mais');
+  }
+  if (action === 'done' && id) {
+    const c = store.card(id);
+    if (c && !c.done) {
+      store.updateCard(id, { done: true });
+      toast('Demanda concluída ✓' + (c.repeat ? ' — próxima criada' : ''));
+    }
+    state.boardId = null;
+    state.tab = 'agenda';
+    render();
+  }
+}
+
+function closeAllOverlays() {
+  let guard = 20;
+  while (hasOverlay() && guard-- > 0) closeTopOverlay();
+}
+
+// ---------- Nova demanda rápida ----------
+function quickAdd() {
+  let boards = store.boards();
+  if (!boards.length) {
+    store.createBoard('Minhas demandas');
+    boards = store.boards();
+  }
+  const pref = store.settings.lastQuickList && store.list(store.settings.lastQuickList);
+  let boardId = pref && boards.some((b) => b.id === pref.boardId) ? pref.boardId : (boards.find((b) => b.starred) || boards[0]).id;
+  let listId = pref && pref.boardId === boardId ? pref.id : null;
+  let priority = 0;
+  let due = null;
+  const { el, close } = fullPanel('quick-panel');
+
+  const pickList = () => {
+    const lists = store.lists(boardId);
+    if (!lists.some((l) => l.id === listId)) listId = (lists.find((l) => !l.isDone) || lists[0])?.id || null;
+  };
+  pickList();
+
+  const draw = (keepTitle = '') => {
+    const lists = store.lists(boardId);
+    el.innerHTML = `<div class="panel">
+      <header class="panel-head"><button class="icon-btn" data-x>${icon('close')}</button><h2 class="grow">Nova demanda</h2></header>
+      <form class="panel-body quick-form">
+        <textarea class="title-input boxed" rows="2" placeholder="O que precisa ser feito?" required>${esc(keepTitle)}</textarea>
+        <div class="field two">
+          <div><label>${icon('boards', 16)} Quadro</label>
+            <select class="input" data-q="board">${boards.map((b) => `<option value="${b.id}" ${b.id === boardId ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></div>
+          <div><label>${icon('desc', 16)} Lista</label>
+            <select class="input" data-q="list">${lists.map((l) => `<option value="${l.id}" ${l.id === listId ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>
+        </div>
+        <div class="field"><label>${icon('flag', 16)} Prioridade</label>
+          <div class="seg">${[0, 1, 2, 3, 4].map((p) => `<button type="button" class="${priority === p ? 'on' : ''}" data-prio="${p}" style="--pc:${PRIORITIES[p].color}">${p ? PRIORITIES[p].name : 'Nenhuma'}</button>`).join('')}</div></div>
+        <div class="field"><label>${icon('clock', 16)} Prazo</label>
+          <div class="quick-dates">
+            <button type="button" class="chip ${!due ? 'on' : ''}" data-due="none">Sem prazo</button>
+            <button type="button" class="chip" data-due="today">Hoje 18h</button>
+            <button type="button" class="chip" data-due="tomorrow">Amanhã 9h</button>
+            <button type="button" class="chip" data-due="1h">Daqui 1h</button>
+          </div>
+          <input class="input" type="datetime-local" data-q="due" value="${toInputValue(due)}" style="margin-top:8px">
+        </div>
+        <button class="btn primary block" type="submit" style="margin-top:22px">Criar demanda</button>
+        <button class="btn ghost block" type="button" data-q="another">Criar e adicionar outra</button>
+      </form></div>`;
+    const t = el.querySelector('textarea');
+    setTimeout(() => t.focus(), 120);
+  };
+  draw();
+
+  const create = (again) => {
+    const t = el.querySelector('textarea');
+    const title = t.value.trim();
+    if (!title) return t.focus();
+    if (!listId) return toast('Esse quadro não tem listas');
+    const extra = { priority };
+    if (due) extra.due = due;
+    store.createCard(listId, title, extra);
+    store.settings.lastQuickList = listId;
+    store.commit();
+    haptic();
+    if (again) {
+      priority = 0;
+      due = null;
+      draw();
+      toast('Demanda criada ✓');
+    } else {
+      close();
+      toast('Demanda criada ✓');
+    }
+  };
+
+  el.addEventListener('submit', (e) => {
+    e.preventDefault();
+    create(false);
+  });
+  el.addEventListener('change', (e) => {
+    const q = e.target.dataset.q;
+    const title = el.querySelector('textarea').value;
+    if (q === 'board') {
+      boardId = e.target.value;
+      listId = null;
+      pickList();
+      draw(title);
+    }
+    if (q === 'list') listId = e.target.value;
+    if (q === 'due') {
+      due = fromInputValue(e.target.value);
+      draw(title);
+    }
+  });
+  el.addEventListener('click', (e) => {
+    if (e.target.closest('[data-x]')) return close();
+    if (e.target.closest('[data-q="another"]')) return create(true);
+    const title = el.querySelector('textarea')?.value || '';
+    const p = e.target.closest('[data-prio]');
+    if (p) {
+      priority = +p.dataset.prio;
+      draw(title);
+    }
+    const d = e.target.closest('[data-due]');
+    if (d) {
+      const n = new Date();
+      const v = d.dataset.due;
+      if (v === 'none') due = null;
+      if (v === 'today') { n.setHours(18, 0, 0, 0); due = n.getTime(); }
+      if (v === 'tomorrow') { n.setDate(n.getDate() + 1); n.setHours(9, 0, 0, 0); due = n.getTime(); }
+      if (v === '1h') due = Date.now() + 3600000;
+      draw(title);
+    }
+  });
 }
 
 App.addListener('backButton', () => {
@@ -1398,12 +1580,25 @@ App.addListener('backButton', () => {
   App.minimizeApp();
 });
 
-App.addListener('appStateChange', ({ isActive }) => {
-  if (isActive && state.user && !hasOverlay()) render(); // atualiza "atrasadas", "hoje" etc.
+App.addListener('appStateChange', async ({ isActive }) => {
+  if (!state.user) return;
+  if (isActive) {
+    await store.reload(); // pega alterações feitas pelo widget
+    if (!hasOverlay()) render();
+  } else {
+    refreshWidgets();
+  }
 });
+
+App.addListener('appUrlOpen', ({ url }) => handleLink(url));
+
+if (native) {
+  WidgetBridge.addListener('dataChanged', () => store.reload()).catch(() => {});
+}
 
 store.subscribe(() => {
   if (state.user) render();
+  refreshWidgets();
 });
 
 // Atualiza a tela a cada minuto (prazos mudam de status)
@@ -1417,6 +1612,10 @@ setInterval(() => {
 (async function init() {
   applyTheme();
   await notify.initNotifications(handleNotificationAction);
+  try {
+    const launch = await App.getLaunchUrl();
+    if (launch?.url) pendingLink = launch.url;
+  } catch {}
   const session = await auth.loadSession();
   if (session) {
     const user = await auth.getUser(session.userId);
