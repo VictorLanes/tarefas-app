@@ -1,0 +1,28 @@
+{
+  "name": "tarefas-app",
+  "version": "1.0.0",
+  "description": "Gerenciador de demandas estilo Trello para Android",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=esm --target=chrome90 --minify --sourcemap --outfile=www/js/app.js",
+    "dev": "esbuild src/main.js --bundle --format=esm --outfile=www/js/app.js --servedir=www --serve=8080",
+    "sync": "npm run build && cap sync android"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/share": "^8.0.3",
+    "sortablejs": "^1.15.7"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2",
+    "esbuild": "^0.28.2"
+  },
+  "private": true
+}
